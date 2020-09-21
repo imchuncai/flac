@@ -6,19 +6,19 @@ import (
 )
 
 type Steam struct {
-	Flac     [4]byte
-	Metadata []MetadataBlock
-	Frame    []byte
+	Marker        [4]byte
+	MetadataBlock []Metadata
+	Frame         []byte
 }
 
-type MetadataBlock struct {
-	MetadataBlockHeader
+type Metadata struct {
+	MetadataHeader
 	Data []byte
 }
 
-type MetadataBlockHeader struct {
+type MetadataHeader struct {
 	LastMetadataBlock bool
-	BlockType         int
+	BlockType         byte
 }
 
 type Vorbis struct {
