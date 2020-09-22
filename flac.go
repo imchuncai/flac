@@ -24,7 +24,7 @@ func main() {
 	}
 	defer f.Close()
 
-	steam.VorbisComments.UserCommentList["ARTIST"] = "imchucani"
+	steam.VorbisComments.UserCommentList["ARTIST"] = "imchuncai"
 
 	err = steam.Repack(f)
 	if err != nil {
@@ -33,7 +33,7 @@ func main() {
 }
 
 // func main() {
-// 	var steam, err = analyze("a.flac")
+// 	var steam, err = analyze("temp.flac")
 // 	if err != nil {
 // 		panic(err)
 // 	}
@@ -54,9 +54,16 @@ func analyze(path string) (steam Steam, err error) {
 		return steam, ERROR_NOT_FLAC
 	}
 
-	steam.MetadataBlock, steam.VorbisComments, err = readMetadataBlock(f)
+	var last bool
+	steam.StreamInfo, last, err = readMetadata(f)
 	if err != nil {
 		return steam, ERROR_NOT_FLAC
+	}
+	if !last {
+		steam.MetadataBlock, steam.VorbisComments, err = readMetadataBlock(f)
+		if err != nil {
+			return steam, ERROR_NOT_FLAC
+		}
 	}
 
 	steam.Frame, err = ioutil.ReadAll(f)
@@ -82,12 +89,13 @@ func readMetadataBlock(f *os.File) (metadataBlock []Metadata, vorbisComments Vor
 		if err != nil {
 			return nil, Vorbis{}, ERROR_NOT_FLAC
 		}
-		if metadata.BlockType == 4 {
+		switch metadata.BlockType {
+		case 4:
 			vorbisComments, err = parseVorbis(metadata.Data)
 			if err != nil {
 				return nil, Vorbis{}, ERROR_NOT_FLAC
 			}
-		} else {
+		default:
 			metadataBlock = append(metadataBlock, metadata)
 		}
 		if last {

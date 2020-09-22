@@ -9,6 +9,7 @@ type Steam struct {
 	Marker         [4]byte
 	MetadataBlock  []Metadata
 	VorbisComments Vorbis
+	StreamInfo     Metadata
 	Frame          []byte
 }
 
@@ -28,12 +29,17 @@ func (s *Steam) Repack(w io.Writer) error {
 		return err
 	}
 
-	err = s.repackMetadataBlock(w)
+	err = s.repackStreamInfo(w)
 	if err != nil {
 		return err
 	}
 
 	err = s.repackVorbisComments(w)
+	if err != nil {
+		return err
+	}
+
+	err = s.repackMetadataBlock(w)
 	if err != nil {
 		return err
 	}
@@ -46,6 +52,24 @@ func (s *Steam) Repack(w io.Writer) error {
 	return nil
 }
 
+func (s *Steam) repackStreamInfo(w io.Writer) error {
+	var _, err = w.Write([]byte{s.StreamInfo.BlockType})
+	if err != nil {
+		return err
+	}
+	var length = make([]byte, 4)
+	binary.BigEndian.PutUint32(length, uint32(len(s.StreamInfo.Data)))
+	_, err = w.Write(length[1:])
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(s.StreamInfo.Data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Steam) repackMarker(w io.Writer) error {
 	var _, err = w.Write(s.Marker[:])
 	if err != nil {
@@ -54,9 +78,13 @@ func (s *Steam) repackMarker(w io.Writer) error {
 	return nil
 }
 
-func (s *Steam) repackMetadataBlock(w io.Writer) error {
-	for _, metadata := range s.MetadataBlock {
-		var _, err = w.Write([]byte{metadata.BlockType})
+func (s *Steam) repackMetadataBlock(w io.Writer) (err error) {
+	for i, metadata := range s.MetadataBlock {
+		if i == len(s.MetadataBlock)-1 {
+			_, err = w.Write([]byte{metadata.BlockType | 0b1000_0000})
+		} else {
+			_, err = w.Write([]byte{metadata.BlockType})
+		}
 		if err != nil {
 			return err
 		}
@@ -75,7 +103,7 @@ func (s *Steam) repackMetadataBlock(w io.Writer) error {
 }
 
 func (s *Steam) repackVorbisComments(w io.Writer) error {
-	var _, err = w.Write([]byte{0b10000100})
+	var _, err = w.Write([]byte{0b00000100})
 	if err != nil {
 		return err
 	}
