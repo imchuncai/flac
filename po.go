@@ -2,72 +2,130 @@ package main
 
 import (
 	"encoding/binary"
-	"strings"
+	"io"
 )
 
 type Steam struct {
-	Marker        [4]byte
-	MetadataBlock []Metadata
-	Frame         []byte
+	Marker         [4]byte
+	MetadataBlock  []Metadata
+	VorbisComments Vorbis
+	Frame          []byte
 }
 
 type Metadata struct {
-	MetadataHeader
-	Data []byte
-}
-
-type MetadataHeader struct {
-	LastMetadataBlock bool
-	BlockType         byte
+	BlockType byte
+	Data      []byte
 }
 
 type Vorbis struct {
-	VendorString    []byte
+	VendorString    string
 	UserCommentList map[string]string
 }
 
-func ParseVorbis(data []byte) Vorbis {
-	var vorbis Vorbis
-	vorbis.UserCommentList = make(map[string]string)
-	var venderLength = int(binary.LittleEndian.Uint32(data[:4]))
-	data = data[4:]
-	vorbis.VendorString = data[:venderLength]
-	data = data[venderLength:]
-	var userCommentListLength = int(binary.LittleEndian.Uint32(data[:4]))
-	data = data[4:]
-
-	for i := 0; i < userCommentListLength; i++ {
-		var length = int(binary.LittleEndian.Uint32(data[:4]))
-		data = data[4:]
-		var value = string(data[:length])
-		data = data[length:]
-		var k, v = AnalyzeKV(value)
-		vorbis.UserCommentList[k] = v
+func (s *Steam) Repack(w io.Writer) error {
+	var err = s.repackMarker(w)
+	if err != nil {
+		return err
 	}
-	return vorbis
+
+	err = s.repackMetadataBlock(w)
+	if err != nil {
+		return err
+	}
+
+	err = s.repackVorbisComments(w)
+	if err != nil {
+		return err
+	}
+
+	err = s.repackFrame(w)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func AnalyzeKV(data string) (key, value string) {
-	var EqualSignIndex = strings.Index(data, "=")
-	return data[:EqualSignIndex], data[EqualSignIndex+1:]
+func (s *Steam) repackMarker(w io.Writer) error {
+	var _, err = w.Write(s.Marker[:])
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-// func RepackStream(steam Steam, vorbis Vorbis) []byte {
-// 	var data = make([]byte, 0, len(steam.Frame))
-// 	data = append(data, steam.Flac[:]...)
-// 	for _, metadata := range steam.Metadata {
-// 		if metadata.BlockType != 4 {
+func (s *Steam) repackMetadataBlock(w io.Writer) error {
+	for _, metadata := range s.MetadataBlock {
+		var _, err = w.Write([]byte{metadata.BlockType})
+		if err != nil {
+			return err
+		}
+		var length = make([]byte, 4)
+		binary.BigEndian.PutUint32(length, uint32(len(metadata.Data)))
+		_, err = w.Write(length[1:])
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(metadata.Data)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-// 			data = append(data)
-// 		}
-// 	}
-// }
-// func PackMetadata(metadata MetadataBlock) []byte {
-// 	if metadata.BlockType == 4 {
-// 		return PackVorbis(metadata.Data)
-// 	}
-// }
+func (s *Steam) repackVorbisComments(w io.Writer) error {
+	var _, err = w.Write([]byte{0b10000100})
+	if err != nil {
+		return err
+	}
 
-// func PackVorbis(vorbis Vorbis) []byte {
-// 	var data []byte
-// }
+	var length = 4 + len(s.VorbisComments.VendorString) + 4
+	for k, v := range s.VorbisComments.UserCommentList {
+		var userComment = k + "=" + v
+		length += 4 + len(userComment)
+	}
+
+	var lengthData = make([]byte, 4)
+	binary.BigEndian.PutUint32(lengthData, uint32(length))
+	_, err = w.Write(lengthData[1:])
+	if err != nil {
+		return err
+	}
+
+	var venderLengthData = make([]byte, 4)
+	binary.LittleEndian.PutUint32(venderLengthData, uint32(len(s.VorbisComments.VendorString)))
+	_, err = w.Write(venderLengthData)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write([]byte(s.VorbisComments.VendorString))
+	if err != nil {
+		return err
+	}
+	var userCommentListLengthData = make([]byte, 4)
+	binary.LittleEndian.PutUint32(userCommentListLengthData, uint32(len(s.VorbisComments.UserCommentList)))
+	_, err = w.Write(userCommentListLengthData)
+	if err != nil {
+		return err
+	}
+	for k, v := range s.VorbisComments.UserCommentList {
+		var userComment = k + "=" + v
+		var lengthData = make([]byte, 4)
+		binary.LittleEndian.PutUint32(lengthData, uint32(len(userComment)))
+		_, err = w.Write(lengthData)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write([]byte(userComment))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Steam) repackFrame(w io.Writer) error {
+	var _, err = w.Write(s.Frame)
+	return err
+}
