@@ -3,72 +3,72 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"strings"
 )
 
-var ERROR_NOT_FLAC = errors.New("Not a FLAC stream")
-
-func main() {
-	var steam, err = analyze("a.flac")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(steam.VorbisComments)
-	f, err := os.Create("temp.flac")
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-
-	steam.VorbisComments.UserCommentList["ARTIST"] = "imchuncai"
-
-	err = steam.Repack(f)
-	if err != nil {
-		panic(err)
-	}
-}
-
 // func main() {
-// 	var steam, err = analyze("temp.flac")
+// 	var steam, err = analyze("a.flac")
 // 	if err != nil {
 // 		panic(err)
 // 	}
 // 	fmt.Println(steam.VorbisComments)
+// 	f, err := os.Create("temp.flac")
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	defer f.Close()
+
+// 	steam.VorbisComments.UserCommentList["ARTIST"] = "imchuncai"
+
+// 	err = steam.Repack(f)
+// 	if err != nil {
+// 		panic(err)
+// 	}
 // }
+
+func main() {
+	var steam, err = analyze("temp.flac")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(steam.VorbisComments)
+}
 
 func analyze(path string) (steam Steam, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return
+		return steam, err
 	}
 	defer func() {
 		err = f.Close()
 	}()
 
 	steam.Marker, err = readMarker(f)
-	if err != nil || steam.Marker != [4]byte{'f', 'L', 'a', 'C'} {
-		return steam, ERROR_NOT_FLAC
+	if err != nil {
+		return
+	}
+	if steam.Marker != [4]byte{'f', 'L', 'a', 'C'} {
+		return steam, NotFLACFormatError{"read marker", WRONG_MARKER}
 	}
 
 	var last bool
 	steam.StreamInfo, last, err = readMetadata(f)
 	if err != nil {
-		return steam, ERROR_NOT_FLAC
+		return
 	}
 	if !last {
 		steam.MetadataBlock, steam.VorbisComments, err = readMetadataBlock(f)
 		if err != nil {
-			return steam, ERROR_NOT_FLAC
+			return
 		}
 	}
 
 	steam.Frame, err = ioutil.ReadAll(f)
 	if err != nil {
-		return steam, ERROR_NOT_FLAC
+		return
 	}
 
 	return
@@ -77,7 +77,7 @@ func analyze(path string) (steam Steam, err error) {
 func readMarker(f *os.File) (marker [4]byte, err error) {
 	_, err = f.Read(marker[:])
 	if err != nil {
-		return marker, ERROR_NOT_FLAC
+		return marker, NotFLACFormatError{"read marker", err}
 	}
 	return marker, nil
 }
@@ -85,15 +85,16 @@ func readMarker(f *os.File) (marker [4]byte, err error) {
 func readMetadataBlock(f *os.File) (metadataBlock []Metadata, vorbisComments Vorbis, err error) {
 	metadataBlock = make([]Metadata, 0, 6)
 	for {
-		metadata, last, err := readMetadata(f)
+		var metadata, last = Metadata{}, false
+		metadata, last, err = readMetadata(f)
 		if err != nil {
-			return nil, Vorbis{}, ERROR_NOT_FLAC
+			return
 		}
 		switch metadata.BlockType {
 		case 4:
 			vorbisComments, err = parseVorbis(metadata.Data)
 			if err != nil {
-				return nil, Vorbis{}, ERROR_NOT_FLAC
+				return
 			}
 		default:
 			metadataBlock = append(metadataBlock, metadata)
@@ -108,13 +109,16 @@ func readMetadata(f *os.File) (metadata Metadata, last bool, err error) {
 	var header = make([]byte, 4)
 	_, err = f.Read(header)
 	if err != nil {
-		return
+		return Metadata{}, false, NotFLACFormatError{"read metadata header", err}
 	}
 	last = header[0]>>7 == 1
 	metadata.BlockType = header[0] & 0b0111_1111
 	var length = int(header[1])<<16 + int(header[2])<<8 + int(header[3])
 	metadata.Data = make([]byte, length)
 	_, err = f.Read(metadata.Data)
+	if err != nil {
+		return Metadata{}, false, NotFLACFormatError{"read metadata data", err}
+	}
 	return
 }
 
@@ -122,21 +126,21 @@ func parseVorbis(data []byte) (vorbisComments Vorbis, err error) {
 	var r = bytes.NewReader(data)
 	vorbisComments.VendorString, err = readData(r)
 	if err != nil {
-		return
+		return Vorbis{}, NotFLACFormatError{"read vorbis vendor", err}
 	}
 	userCommentListLength, err := readLength(r)
 	if err != nil {
-		return
+		return Vorbis{}, NotFLACFormatError{"read vorbis user comment list length", err}
 	}
 	vorbisComments.UserCommentList = make(map[string]string, userCommentListLength)
 	for i := 0; i < userCommentListLength; i++ {
 		var userComment, err = readData(r)
 		if err != nil {
-			return Vorbis{}, err
+			return Vorbis{}, NotFLACFormatError{"read vorbis user comment data", err}
 		}
 		k, v, err := analyzeUserComment(userComment)
 		if err != nil {
-			return Vorbis{}, err
+			return Vorbis{}, NotFLACFormatError{"analyze vorbis user comment data", err}
 		}
 		vorbisComments.UserCommentList[k] = v
 	}
@@ -165,7 +169,7 @@ func readData(r *bytes.Reader) (value string, err error) {
 func analyzeUserComment(data string) (key, value string, err error) {
 	var equalSignIndex = strings.Index(data, "=")
 	if equalSignIndex == -1 {
-		return "", "", errors.New("User comment bad format")
+		return "", "", NOT_FIND_EQUAL_SIGN
 	}
 	return data[:equalSignIndex], data[equalSignIndex+1:], nil
 }
