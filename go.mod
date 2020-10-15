@@ -1,3 +1,3 @@
-module imchuncai.com/flac
+module github.com/imchuncai/flac
 
 go 1.14
