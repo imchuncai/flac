@@ -30,14 +30,14 @@ import (
 // }
 
 func main() {
-	var steam, err = analyze("temp.flac")
+	var steam, err = Analyze("temp.flac")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(steam.VorbisComments)
 }
 
-func analyze(path string) (steam Steam, err error) {
+func Analyze(path string) (steam Steam, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return steam, err
