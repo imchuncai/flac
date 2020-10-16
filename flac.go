@@ -86,6 +86,7 @@ func Analyze(path string) (steam Steam, err error) {
 		return steam, NotFLACFormatError{"read marker", WRONG_MARKER}
 	}
 
+	// Steam info must be present as the first metadata block in the stream.
 	var last bool
 	steam.StreamInfo, last, err = readMetadata(f)
 	if err != nil {
