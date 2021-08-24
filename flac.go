@@ -196,7 +196,7 @@ func readData(r *bytes.Reader) (value string, err error) {
 	}
 	var data = make([]byte, length)
 	_, err = r.Read(data)
-	return string(data), nil
+	return string(data), err
 }
 
 func analyzeUserComment(data string) (key, value string, err error) {
